@@ -999,11 +999,11 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
 
         attention_mask = kwargs.get("attention_mask", None)
         position_ids = kwargs.get("position_ids", None)
-        attention_mask_for_pad = torch.ones_like(attention_mask[:, 0, :], dtype=torch.long, device=input_ids.device) # NOTE different when there's padding
 
         if attention_mask is not None and position_ids is None:
             # create position_ids on the fly for batch generation
             if self.config.use_attention_matrix:
+                attention_mask_for_pad = torch.ones_like(attention_mask[:, 0, :], dtype=torch.long, device=input_ids.device) # NOTE different when there's padding
                 position_ids = attention_mask_for_pad.long().cumsum(-1) - 1
                 position_ids.masked_fill_(attention_mask_for_pad == 0, 1)
             else:
@@ -1177,11 +1177,11 @@ class GPT2DoubleHeadsModel(GPT2PreTrainedModel):
 
         attention_mask = kwargs.get("attention_mask", None)
         position_ids = kwargs.get("position_ids", None)
-        attention_mask_for_pad = torch.ones_like(attention_mask[:, 0, :], dtype=torch.long, device=input_ids.device) # NOTE different when there's padding
 
         if attention_mask is not None and position_ids is None:
             # create position_ids on the fly for batch generation
             if self.config.use_attention_matrix:
+                attention_mask_for_pad = torch.ones_like(attention_mask[:, 0, :], dtype=torch.long, device=input_ids.device) # NOTE different when there's padding
                 position_ids = attention_mask_for_pad.long().cumsum(-1) - 1
                 position_ids.masked_fill_(attention_mask_for_pad == 0, 1)
             else:
