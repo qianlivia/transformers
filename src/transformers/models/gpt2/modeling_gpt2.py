@@ -795,13 +795,19 @@ class GPT2Model(GPT2PreTrainedModel):
         if attention_mask is not None:
             if batch_size <= 0:
                 raise ValueError("batch_size has to be defined and > 0")
-            attention_mask = attention_mask.view(batch_size, -1)
-            # We create a 3D attention mask from a 2D tensor mask.
-            # Sizes are [batch_size, 1, 1, to_seq_length]
-            # So we can broadcast to [batch_size, num_heads, from_seq_length, to_seq_length]
-            # this attention mask is more simple than the triangular masking of causal attention
-            # used in OpenAI GPT, we just need to prepare the broadcast dimension here.
-            attention_mask = attention_mask[:, None, None, :]
+            if self.config.use_attention_matrix:
+                if len(attention_mask.shape) == 3:
+                    attention_mask = attention_mask[:, None, :, :]
+                elif len(attention_mask.shape) == 2:
+                    attention_mask = attention_mask[:, None, None, :]
+            else:
+                attention_mask = attention_mask.view(batch_size, -1)
+                # We create a 3D attention mask
+                # Sizes are [batch_size, 1, from_seq_length, to_seq_length]
+                # So we can broadcast to [batch_size, num_heads, from_seq_length, to_seq_length]
+                # this attention mask is more simple than the triangular masking of causal attention
+                # used in OpenAI GPT, we just need to prepare the broadcast dimension here.
+                attention_mask = attention_mask[:, None, None, :]
 
             # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
             # masked positions, this operation will create a tensor which is 0.0 for
@@ -993,11 +999,16 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
 
         attention_mask = kwargs.get("attention_mask", None)
         position_ids = kwargs.get("position_ids", None)
+        attention_mask_for_pad = torch.ones_like(attention_mask[:, 0, :], dtype=torch.long, device=input_ids.device) # NOTE different when there's padding
 
         if attention_mask is not None and position_ids is None:
             # create position_ids on the fly for batch generation
-            position_ids = attention_mask.long().cumsum(-1) - 1
-            position_ids.masked_fill_(attention_mask == 0, 1)
+            if self.config.use_attention_matrix:
+                position_ids = attention_mask_for_pad.long().cumsum(-1) - 1
+                position_ids.masked_fill_(attention_mask_for_pad == 0, 1)
+            else:
+                position_ids = attention_mask.long().cumsum(-1) - 1
+                position_ids.masked_fill_(attention_mask == 0, 1)
             if past:
                 position_ids = position_ids[:, -1].unsqueeze(-1)
         else:
@@ -1166,16 +1177,20 @@ class GPT2DoubleHeadsModel(GPT2PreTrainedModel):
 
         attention_mask = kwargs.get("attention_mask", None)
         position_ids = kwargs.get("position_ids", None)
+        attention_mask_for_pad = torch.ones_like(attention_mask[:, 0, :], dtype=torch.long, device=input_ids.device) # NOTE different when there's padding
 
         if attention_mask is not None and position_ids is None:
             # create position_ids on the fly for batch generation
-            position_ids = attention_mask.long().cumsum(-1) - 1
-            position_ids.masked_fill_(attention_mask == 0, 1)
+            if self.config.use_attention_matrix:
+                position_ids = attention_mask_for_pad.long().cumsum(-1) - 1
+                position_ids.masked_fill_(attention_mask_for_pad == 0, 1)
+            else:
+                position_ids = attention_mask.long().cumsum(-1) - 1
+                position_ids.masked_fill_(attention_mask == 0, 1)
             if past:
                 position_ids = position_ids[:, -1].unsqueeze(-1)
         else:
             position_ids = None
-
         return {
             "input_ids": input_ids,
             "past_key_values": past,

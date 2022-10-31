@@ -551,16 +551,27 @@ class GenerationMixin:
         inputs: torch.Tensor,
         pad_token_id: Optional[int],
         eos_token_id: Optional[int],
+        re_token_id: Optional[int],
+        c_token_id: Optional[int],
+        use_attention_matrix: Optional[bool],
     ) -> torch.LongTensor:
+        from src.common.utils import create_attention_matrix
+        
         is_input_ids = len(inputs.shape) == 2 and inputs.dtype in [torch.int, torch.long]
         is_pad_token_in_inputs = (pad_token_id is not None) and (pad_token_id in inputs)
         is_pad_token_not_equal_to_eos_token_id = (eos_token_id is None) or (pad_token_id != eos_token_id)
 
         # Check if input is input_ids and padded -> only then is attention_mask defined
         if is_input_ids and is_pad_token_in_inputs and is_pad_token_not_equal_to_eos_token_id:
-            return inputs.ne(pad_token_id).long()
+            attention_mask = inputs.ne(pad_token_id).long()
         else:
-            return torch.ones(inputs.shape[:2], dtype=torch.long, device=inputs.device)
+            attention_mask = torch.ones(inputs.shape[:2], dtype=torch.long, device=inputs.device)
+        
+        if not use_attention_matrix:
+            return attention_mask
+        
+        width = inputs.shape[1]
+        return create_attention_matrix(inputs, attention_mask, width, re_token_id, c_token_id)
 
     def _prepare_encoder_decoder_kwargs_for_generation(
         self, inputs_tensor: torch.Tensor, model_kwargs, model_input_name: Optional[str] = None
@@ -658,7 +669,7 @@ class GenerationMixin:
 
     @staticmethod
     def _update_model_kwargs_for_generation(
-        outputs: ModelOutput, model_kwargs: Dict[str, Any], is_encoder_decoder: bool = False
+        outputs: ModelOutput, model_kwargs: Dict[str, Any], is_encoder_decoder: bool = False, use_attention_matrix: bool = False,
     ) -> Dict[str, Any]:
         # update past
         if "past_key_values" in outputs:
@@ -676,12 +687,24 @@ class GenerationMixin:
             model_kwargs["token_type_ids"] = torch.cat([token_type_ids, token_type_ids[:, -1].unsqueeze(-1)], dim=-1)
 
         # update attention mask
-        if not is_encoder_decoder:
-            if "attention_mask" in model_kwargs:
-                attention_mask = model_kwargs["attention_mask"]
-                model_kwargs["attention_mask"] = torch.cat(
-                    [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
-                )
+        if not use_attention_matrix:
+            if not is_encoder_decoder:
+                if "attention_mask" in model_kwargs:
+                    attention_mask = model_kwargs["attention_mask"]
+                    model_kwargs["attention_mask"] = torch.cat(
+                        [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
+                    )
+        # else:
+        #     if not is_encoder_decoder:
+        #         if "attention_mask" in model_kwargs:
+        #             attention_mask = model_kwargs["attention_mask"][:, 0, :]
+        #             model_kwargs["attention_mask"] = torch.cat(
+        #                 [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
+        #             ).unsqueeze(1) # Add column
+                    # attention_mask = model_kwargs["attention_mask"]
+                    # model_kwargs["attention_mask"] = torch.cat( # NOTE
+                    #     [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1, attention_mask.shape[1] + 1))], dim=-2
+                    # ) # Add row
 
         return model_kwargs
 
@@ -986,6 +1009,9 @@ class GenerationMixin:
         bos_token_id: Optional[int] = None,
         pad_token_id: Optional[int] = None,
         eos_token_id: Optional[int] = None,
+        re_token_id: Optional[int] = None,
+        c_token_id: Optional[int] = None,
+        use_attention_matrix: Optional[bool] = None,
         length_penalty: Optional[float] = None,
         no_repeat_ngram_size: Optional[int] = None,
         encoder_no_repeat_ngram_size: Optional[int] = None,
@@ -1282,6 +1308,9 @@ class GenerationMixin:
 
         pad_token_id = pad_token_id if pad_token_id is not None else self.config.pad_token_id
         eos_token_id = eos_token_id if eos_token_id is not None else self.config.eos_token_id
+        re_token_id = re_token_id if re_token_id is not None else self.config.re_token_id
+        c_token_id = c_token_id if c_token_id is not None else self.config.c_token_id
+        use_attention_matrix = use_attention_matrix if use_attention_matrix is not None else True
 
         if eos_token_id is None and hasattr(self.config, "decoder"):
             eos_token_id = self.config.decoder.eos_token_id
@@ -1322,7 +1351,7 @@ class GenerationMixin:
 
         if model_kwargs.get("attention_mask", None) is None and requires_attention_mask and accepts_attention_mask:
             model_kwargs["attention_mask"] = self._prepare_attention_mask_for_generation(
-                inputs_tensor, pad_token_id, eos_token_id
+                inputs_tensor, pad_token_id, eos_token_id, re_token_id, c_token_id, use_attention_matrix
             )
 
         # decoder-only models should use left-padding for generation
@@ -1547,6 +1576,9 @@ class GenerationMixin:
                 stopping_criteria=stopping_criteria,
                 pad_token_id=pad_token_id,
                 eos_token_id=eos_token_id,
+                re_token_id=re_token_id,
+                c_token_id=c_token_id,
+                use_attention_matrix=use_attention_matrix,
                 output_scores=output_scores,
                 return_dict_in_generate=return_dict_in_generate,
                 synced_gpus=synced_gpus,
@@ -2319,6 +2351,9 @@ class GenerationMixin:
         max_length: Optional[int] = None,
         pad_token_id: Optional[int] = None,
         eos_token_id: Optional[int] = None,
+        re_token_id: Optional[int] = None,
+        c_token_id: Optional[int] = None,
+        use_attention_matrix: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         output_scores: Optional[bool] = None,
@@ -2526,8 +2561,14 @@ class GenerationMixin:
             # update generated ids, model inputs, and length for next step
             input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
             model_kwargs = self._update_model_kwargs_for_generation(
-                outputs, model_kwargs, is_encoder_decoder=self.config.is_encoder_decoder
+                outputs, model_kwargs, is_encoder_decoder=self.config.is_encoder_decoder, use_attention_matrix=use_attention_matrix,
             )
+            # If there are past values, then return a vector as an attention mask.
+            # All past tokens that are between <RE> and <C> tags should be masked.
+            if use_attention_matrix: # If an attention matrix was used during training, the current attention mask needs to be replaced with an attention vector
+                from src.common.utils import create_attention_vector
+                if model_kwargs["past"] is not None and not self.config.is_encoder_decoder and "attention_mask" in model_kwargs:
+                    model_kwargs["attention_mask"] = create_attention_vector(input_ids, re_token_id, c_token_id)
 
             # if eos_token was found in one sentence, set sentence to finished
             if eos_token_id is not None:
