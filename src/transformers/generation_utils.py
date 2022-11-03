@@ -694,17 +694,6 @@ class GenerationMixin:
                     model_kwargs["attention_mask"] = torch.cat(
                         [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
                     )
-        # else:
-        #     if not is_encoder_decoder:
-        #         if "attention_mask" in model_kwargs:
-        #             attention_mask = model_kwargs["attention_mask"][:, 0, :]
-        #             model_kwargs["attention_mask"] = torch.cat(
-        #                 [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
-        #             ).unsqueeze(1) # Add column
-                    # attention_mask = model_kwargs["attention_mask"]
-                    # model_kwargs["attention_mask"] = torch.cat( # NOTE
-                    #     [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1, attention_mask.shape[1] + 1))], dim=-2
-                    # ) # Add row
 
         return model_kwargs
 
@@ -1310,7 +1299,7 @@ class GenerationMixin:
         eos_token_id = eos_token_id if eos_token_id is not None else self.config.eos_token_id
         re_token_id = re_token_id if re_token_id is not None else self.config.re_token_id
         c_token_id = c_token_id if c_token_id is not None else self.config.c_token_id
-        use_attention_matrix = use_attention_matrix if use_attention_matrix is not None else True
+        use_attention_matrix = use_attention_matrix if use_attention_matrix is not None else False
 
         if eos_token_id is None and hasattr(self.config, "decoder"):
             eos_token_id = self.config.decoder.eos_token_id
