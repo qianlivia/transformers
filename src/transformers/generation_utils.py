@@ -1297,8 +1297,6 @@ class GenerationMixin:
 
         pad_token_id = pad_token_id if pad_token_id is not None else self.config.pad_token_id
         eos_token_id = eos_token_id if eos_token_id is not None else self.config.eos_token_id
-        re_token_id = re_token_id if re_token_id is not None else self.config.re_token_id
-        c_token_id = c_token_id if c_token_id is not None else self.config.c_token_id
         use_attention_matrix = use_attention_matrix if use_attention_matrix is not None else False
 
         if eos_token_id is None and hasattr(self.config, "decoder"):
